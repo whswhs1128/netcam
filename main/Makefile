@@ -44,7 +44,8 @@ PREFIX = ..
 
 ##### OBJS = main.$(OBJ) video_capture.$(OBJ)
 OBJS := $(OBJECTS_C) $(OBJECTS_CPP)
-LIBS = -laudio_capture -lvideo_capture -lliveMedia -lgroupsock -lBasicUsageEnvironment -lUsageEnvironment -lssl -lcrypto -lpthread -ldl
+#LIBS = -laudio_capture -lvideo_capture -lliveMedia -lgroupsock -lBasicUsageEnvironment -lUsageEnvironment -lssl -lcrypto -lpthread -ldl
+LIBS = -lvideo_capture -lssl -lcrypto -lpthread -ldl
 
 .PHONY: all clean
 

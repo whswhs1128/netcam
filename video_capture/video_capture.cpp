@@ -15,9 +15,13 @@
 #include<sys/shm.h>
 
 #include "sample_comm.h"
-#include "liveMedia.hh"
+//#include "liveMedia.hh"
 #include "video_capture.h"
 //#include "audio_capture.h"
+#include "sample_comm.h"
+#include "rtsp_demo.h"
+#include "comm.h"
+#include "mpi_region.h"
 
 ////int g_vid_shm = -1;
 struct video_shm_sync_st *g_p_v_shm = (video_shm_sync_st*)-1;//
@@ -26,11 +30,15 @@ struct video_shm_sync_st *g_p_v_shm = (video_shm_sync_st*)-1;//
 #define BIG_STREAM_SIZE     PIC_2688x1944
 #define SMALL_STREAM_SIZE   PIC_VGA
 
+static pthread_t VencPid;
+
 
 #define VB_MAX_NUM            10
 #define ONLINE_LIMIT_WIDTH    2304
 
 #define WRAP_BUF_LINE_EXT     416
+rtsp_demo_handle g_rtsplive = NULL;
+rtsp_session_handle session= NULL;
 
 typedef struct hiSAMPLE_VPSS_ATTR_S
 {
@@ -870,6 +878,158 @@ HI_S32 SAMPLE_VENC_ModifyResolution(SAMPLE_SNS_TYPE_E   enSnsType,PIC_SIZE_E *pe
 }
 
 /******************************************************************************
+* funciton : get stream from each channels and save them
+******************************************************************************/
+HI_VOID* VENC_GetVencStreamProc(HI_VOID *p)
+{  
+	HI_S32 s32Ret = 0;
+	static int s_LivevencChn = 0,s_LivevencFd=0; 
+	static int s_maxFd = 0;
+
+	fd_set read_fds;
+	VENC_STREAM_S stVStream;
+	VENC_CHN_STATUS_S stStat;
+
+	s_LivevencChn = 0;
+	s_LivevencFd  = HI_MPI_VENC_GetFd(s_LivevencChn);	
+	s_maxFd   = s_maxFd > s_LivevencFd ? s_maxFd:s_LivevencFd;	
+	s_maxFd = s_maxFd+1;
+
+	
+	//struct sched_param param;
+	struct timeval TimeoutVal;
+	VENC_PACK_S *pstPack = NULL;	
+	pstPack = (VENC_PACK_S *)malloc(sizeof(VENC_PACK_S) * 128);
+	printf("enter streamproc function...\n");
+          SAMPLE_PRT("before  steamproc function...!!\n");
+	if (NULL == pstPack)
+	{
+		pstPack = NULL;
+		return NULL;
+	}	
+	int i;
+
+	unsigned char* pStremData = NULL;
+	int nSize = 0;
+	printf("enter streamproc function2...\n");
+
+	while(1)	
+	{
+		FD_ZERO( &read_fds );
+		FD_SET( s_LivevencFd, &read_fds);
+		
+		TimeoutVal.tv_sec  = 2;
+		TimeoutVal.tv_usec = 0;
+		s32Ret = select( s_maxFd, &read_fds, NULL, NULL, &TimeoutVal );
+		if (s32Ret <= 0)
+		{
+			printf("%s select failed!\n",__FUNCTION__);
+			sleep(1);
+			continue;
+		}	
+
+		//Live stream
+		if (FD_ISSET( s_LivevencFd, &read_fds ))
+		{
+			s32Ret = HI_MPI_VENC_QueryStatus( s_LivevencChn, &stStat );
+			if (HI_SUCCESS != s32Ret)
+			{
+				printf("HI_MPI_VENC_Query chn[%d] failed with %#x!\n", s_LivevencChn, s32Ret);
+				continue;
+			}
+	
+			stVStream.pstPack = pstPack;
+			stVStream.u32PackCount = stStat.u32CurPacks;
+			s32Ret = HI_MPI_VENC_GetStream( s_LivevencChn, &stVStream, HI_TRUE );
+			if (HI_SUCCESS != s32Ret)
+			{
+				printf("HI_MPI_VENC_GetStream .. failed with %#x!\n", s32Ret);
+				continue;
+			}
+	
+	
+			for (i = 0; i < stVStream.u32PackCount; i++)
+			{
+				//????SEI?
+				//if(stVStream.pstPack[i].DataType.enH265EType == H265E_NALU_SEI) continue;				
+
+				pStremData = (unsigned char*)stVStream.pstPack[i].pu8Addr+stVStream.pstPack[i].u32Offset;
+				nSize = stVStream.pstPack[i].u32Len-stVStream.pstPack[i].u32Offset;
+
+				if(g_rtsplive)
+				{
+					rtsp_sever_tx_video(g_rtsplive,session,pStremData,nSize,stVStream.pstPack[i].u64PTS);
+				}
+			}	
+	
+			s32Ret = HI_MPI_VENC_ReleaseStream(s_LivevencChn, &stVStream);
+			if (HI_SUCCESS != s32Ret)
+			{
+				SAMPLE_PRT("HI_MPI_VENC_ReleaseStream chn[%d] .. failed with %#x!\n", s_LivevencChn, s32Ret);
+				stVStream.pstPack = NULL;
+				continue;
+			}
+		} 
+	}
+	
+	if(pstPack) free(pstPack);
+	return NULL;
+}
+
+int OSD_Handle_Init( RGN_HANDLE RgnHandle, VENC_CHN RgnVencChn)
+{
+	HI_S32 s32Ret = HI_FAILURE;
+	RGN_ATTR_S stRgnAttr;
+	MPP_CHN_S stChn;
+	VENC_CHN VencGrp;
+	RGN_CHN_ATTR_S stChnAttr;
+
+	/******************************************
+	*  step 1: create overlay regions
+	*****************************************/
+	stRgnAttr.enType                            = OVERLAYEX_RGN; //region type.
+	stRgnAttr.unAttr.stOverlay.enPixelFmt 		= PIXEL_FORMAT_ARGB_1555; //format.
+	stRgnAttr.unAttr.stOverlay.stSize.u32Width  = 0;
+	stRgnAttr.unAttr.stOverlay.stSize.u32Height = 0;
+	stRgnAttr.unAttr.stOverlay.u32BgColor = 0;
+	printf("whs:enter osd_handle_init...\n");
+
+	s32Ret = HI_MPI_RGN_Create(RgnHandle, &stRgnAttr);
+	if (HI_SUCCESS != s32Ret)
+	{
+		SAMPLE_PRT("HI_MPI_RGN_Create (%d) failed with %#x!\n", RgnHandle, s32Ret);
+		return HI_FAILURE;
+	}
+	SAMPLE_PRT("create handle:%d success!\n", RgnHandle);
+	printf("create handle:%d success!\n", RgnHandle);
+
+	/***********************************************************
+	* step 2: attach created region handle to venc channel.
+	**********************************************************/
+	VencGrp = RgnVencChn;
+	stChn.enModId  = HI_ID_VENC;
+	stChn.s32DevId = 0;//0;
+	stChn.s32ChnId = RgnVencChn;
+	memset(&stChnAttr, 0, sizeof(stChnAttr));
+	stChnAttr.bShow 	= HI_TRUE;
+	stChnAttr.enType 	= OVERLAYEX_RGN ;
+	stChnAttr.unChnAttr.stOverlayChn.stPoint.s32X    = 0;
+	stChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y    = 0;           
+	stChnAttr.unChnAttr.stOverlayChn.u32BgAlpha      = 0;
+    stChnAttr.unChnAttr.stOverlayChn.u32FgAlpha 	 = 0;
+    stChnAttr.unChnAttr.stOverlayChn.u32Layer 	     = 0;
+	stChnAttr.unChnAttr.stOverlayChn.stQpInfo.bAbsQp = HI_FALSE;
+	stChnAttr.unChnAttr.stOverlayChn.stQpInfo.s32Qp  = 0;
+	s32Ret = HI_MPI_RGN_AttachToChn(RgnHandle, &stChn, &stChnAttr);
+	if (HI_SUCCESS != s32Ret)
+	{
+		SAMPLE_PRT("HI_MPI_RGN_AttachToChn (%d to %d) failed with %#x!\n", RgnHandle, VencGrp, s32Ret);
+		return HI_FAILURE;
+	}
+	return HI_SUCCESS;
+}
+
+/******************************************************************************
 * function: H.265e + H264e@720P, H.265 Channel resolution adaptable with sensor
 ******************************************************************************/
 void *thVideoCapture(void *arg)
@@ -878,11 +1038,11 @@ void *thVideoCapture(void *arg)
       HI_S32 i;
       HI_S32 s32Ret;
       SIZE_S          stSize[2];
-      PIC_SIZE_E      enSize[2]     = {BIG_STREAM_SIZE, SMALL_STREAM_SIZE};
+      PIC_SIZE_E      enSize[2]     = {BIG_STREAM_SIZE,SMALL_STREAM_SIZE};
       HI_S32          s32ChnNum     = 2;
       VENC_CHN        VencChn[2]    = {0,1};
       HI_U32          u32Profile[2] = {0,0};
-      PAYLOAD_TYPE_E  enPayLoad[2]  = {PT_H265, PT_H264};
+      PAYLOAD_TYPE_E  enPayLoad[2]  = {PT_H265,PT_H264};
       VENC_GOP_MODE_E enGopMode;
       VENC_GOP_ATTR_S stGopAttr;
       SAMPLE_RC_E     enRcMode;
@@ -898,7 +1058,10 @@ void *thVideoCapture(void *arg)
       HI_BOOL         abChnEnable[VPSS_MAX_PHY_CHN_NUM] = {HI_TRUE,HI_TRUE,HI_FALSE};
       SAMPLE_VPSS_CHN_ATTR_S stParam;
       SAMPLE_VB_ATTR_S commVbAttr;
-  g_p_v_shm = (video_shm_sync_st*)arg;
+  //g_p_v_shm = (video_shm_sync_st*)arg;
+  	g_rtsplive = create_rtsp_demo(554);
+	session= create_rtsp_session(g_rtsplive,"/live.sdp");
+    
       for(i=0; i<s32ChnNum; i++)
       {
           s32Ret = SAMPLE_COMM_SYS_GetPicSize(enSize[i], &stSize[i]);
@@ -998,7 +1161,7 @@ void *thVideoCapture(void *arg)
           SAMPLE_PRT("Venc Get GopAttr failed for %#x!\n", s32Ret);
           goto EXIT_VENC_H265_STOP;
       }
-#if 1
+#if 0
       /***encode h.264 **/
       s32Ret = SAMPLE_COMM_VENC_Start(VencChn[1], enPayLoad[1], enSize[1], enRcMode,u32Profile[1],bRcnRefShareBuf,&stGopAttr);
       if (HI_SUCCESS != s32Ret)
@@ -1017,16 +1180,24 @@ void *thVideoCapture(void *arg)
       /******************************************
        stream save process
       ******************************************/
-  pfnStreamPostProc pfnPostProc[VENC_MAX_CHN_NUM];
-  pfnPostProc[0] = PutVideoStreamToRingBuffer;
-  pfnPostProc[1] = NULL;
-  s32Ret = SAMPLE_COMM_VENC_StartGetStream_Ex(VencChn, s32ChnNum, pfnPostProc);
+//   pfnStreamPostProc pfnPostProc[VENC_MAX_CHN_NUM];
+//   pfnPostProc[0] = PutVideoStreamToRingBuffer;
+//   pfnPostProc[1] = NULL;
+//   s32Ret = SAMPLE_COMM_VENC_StartGetStream_Ex(VencChn, s32ChnNum, pfnPostProc);
   //s32Ret = SAMPLE_COMM_VENC_StartGetStream(VencChn, s32ChnNum);
-  if (HI_SUCCESS != s32Ret)
-  {
-    SAMPLE_PRT("Start Venc failed!\n");
-    goto EXIT_VENC_H264_UnBind;
-  }
+
+  
+//   if (HI_SUCCESS != s32Ret)
+//   {
+//     SAMPLE_PRT("Start Venc failed!\n");
+//     goto EXIT_VENC_H264_UnBind;
+//   }
+
+          SAMPLE_PRT("before vencsteamproc!!\n");
+	//pthread_create(&VencPid, 0, VENC_GetVencStreamProc, NULL);
+	VENC_GetVencStreamProc(NULL);
+		//Create osd 
+	//OSD_Handle_Init(1,1);
 
   return NULL;
   printf("please press twice ENTER to exit this sample\n");
@@ -1058,12 +1229,12 @@ EXIT_VI_STOP:
 #else
     HI_S32 i;
     HI_S32 s32Ret;
-    SIZE_S          stSize[1];
-    PIC_SIZE_E      enSize[1]     = {BIG_STREAM_SIZE};
-    HI_S32          s32ChnNum     = 1;
-    VENC_CHN        VencChn[1]    = {0};
-    HI_U32          u32Profile[1] = {0};
-    PAYLOAD_TYPE_E  enPayLoad[1]  = {PT_H265};
+    SIZE_S          stSize[2];
+    PIC_SIZE_E      enSize[2]     = {BIG_STREAM_SIZE,SMALL_STREAM_SIZE};
+    HI_S32          s32ChnNum     = 2;
+    VENC_CHN        VencChn[2]    = {0,1};
+    HI_U32          u32Profile[2] = {0,0};
+    PAYLOAD_TYPE_E  enPayLoad[2]  = {PT_H265,PT_h264};
     VENC_GOP_MODE_E enGopMode;
     VENC_GOP_ATTR_S stGopAttr;
     SAMPLE_RC_E     enRcMode;
@@ -1187,7 +1358,7 @@ EXIT_VI_STOP:
      stream save process
     ******************************************/
     pfnStreamPostProc pfnPostProc[VENC_MAX_CHN_NUM];
-    pfnPostProc[0] = PutVideoStreamToRingBuffer;
+   // pfnPostProc[0] = PutVideoStreamToRingBuffer;
 
     s32Ret = SAMPLE_COMM_VENC_StartGetStream_Ex(VencChn, s32ChnNum, pfnPostProc);
    // s32Ret = SAMPLE_COMM_VENC_StartGetStream(VencChn, s32ChnNum);
@@ -1230,103 +1401,103 @@ EXIT_VI_STOP:
 #endif
 }
 
-HI_S32 PutVideoStreamToRingBuffer(VENC_STREAM_S *pstStream)
-{
-  HI_S32 i;
-  HI_S32 len = 0;
-  //printf("++PutVideoStreamToRingBuffer!\n");
-#if 0
-  if(-1 == g_vid_shm)
-  {
-    key_t key = ftok("shm_rtsp_v",'v');
-    g_vid_shm = shmget(key, VIDEO_BUF_NUM * sizeof(struct video_shm_sync_st), IPC_CREAT | 0666);//返回值为id�?
-
-    if(g_vid_shm < 0)
-    {
-      perror("video:shmget");
-      return HI_FAILURE;
-    }
-  }
-
-  if(g_p_v_shm == (void *)-1)
-  {
-    g_p_v_shm = (struct video_shm_sync_st *)shmat(g_vid_shm, NULL, 0);
-    if(g_p_v_shm == (void *)-1)
-    {
-      perror("shmat");
-      
-      printf("++PutAudioStreamToRingBuffer, mmap shm error!\n");
-      return HI_FAILURE;
-    }
-
-    struct video_shm_sync_st *g_pshm_tmp = g_p_v_shm;
-    for(i = 0; i < VIDEO_BUF_NUM; i++)
-    {
-      g_pshm_tmp->iFlag = 0xA5A5A5A5;
-      g_pshm_tmp++;
-    }
-    g_p_v_shm_tmp = g_p_v_shm;
-  }
-#endif
-
-  if (g_p_v_shm == (void *)-1)
-  {
-    printf("g_p_v_shm is null!\n");
-    return HI_FAILURE;
-  }
-#if 1
-  struct video_shm_sync_st *g_pshm_tmp = g_p_v_shm;
-  for(i = 0; i < VIDEO_BUF_NUM; i++)
-  {
-    if(g_pshm_tmp->iFlag == 0xA5A5A5A5)
-    {
-      break;
-    }
-    else
-    {
-      g_pshm_tmp++;
-    }
-  }
-
-  if(VIDEO_BUF_NUM == i)
-  {
-    //printf("++ no empty audio buffer!\n");
-    //return HI_FAILURE;
-    g_pshm_tmp = g_p_v_shm;
-  }
-#else
-    struct video_shm_sync_st *g_pshm_tmp = g_p_v_shm_tmp;
-    while(g_pshm_tmp->iFlag != 0xA5A5A5A5)
-    {
-        //return HI_SUCCESS;
-        sleep(0);
-    }
-    static HI_S32 s32Count = 0;
-    s32Count++;
-    if(s32Count == VIDEO_BUF_NUM)
-    {
-        g_p_v_shm_tmp = g_p_v_shm;
-        s32Count = 0;
-    }
-    else
-    {
-        g_p_v_shm_tmp++;
-    }
-#endif
-  for(i = 0; i < pstStream->u32PackCount; i++)
-  {
-    memcpy(g_pshm_tmp->pu8Addr + len, pstStream->pstPack[i].pu8Addr, pstStream->pstPack[i].u32Len);
-    len += pstStream->pstPack[i].u32Len;
-  }
-
-  g_pshm_tmp->iLen = len;
-  g_pshm_tmp->iFlag = 0xB4B4B4B4;
-
-  //if(shmdt(g_p_a_shm) < 0)
-  //{
-  //  perror("shmdt");
-  //}
-  //printf("--PutVideoStreamToRingBuffer (%d)!\n", len);
-
-  return HI_SUCCESS;
-}
+//HI_S32 PutVideoStreamToRingBuffer(VENC_STREAM_S *pstStream)
+//{
+//  HI_S32 i;
+//  HI_S32 len = 0;
+//  //printf("++PutVideoStreamToRingBuffer!\n");
+//#if 0
+//  if(-1 == g_vid_shm)
+//  {
+//    key_t key = ftok("shm_rtsp_v",'v');
+//    g_vid_shm = shmget(key, VIDEO_BUF_NUM * sizeof(struct video_shm_sync_st), IPC_CREAT | 0666);//返回值为id�?
+//
+//    if(g_vid_shm < 0)
+//    {
+//      perror("video:shmget");
+//      return HI_FAILURE;
+//    }
+//  }
+//
+//  if(g_p_v_shm == (void *)-1)
+//  {
+//    g_p_v_shm = (struct video_shm_sync_st *)shmat(g_vid_shm, NULL, 0);
+//    if(g_p_v_shm == (void *)-1)
+//    {
+//      perror("shmat");
+//      
+//      printf("++PutAudioStreamToRingBuffer, mmap shm error!\n");
+//      return HI_FAILURE;
+//    }
+//
+//    struct video_shm_sync_st *g_pshm_tmp = g_p_v_shm;
+//    for(i = 0; i < VIDEO_BUF_NUM; i++)
+//    {
+//      g_pshm_tmp->iFlag = 0xA5A5A5A5;
+//      g_pshm_tmp++;
+//    }
+//    g_p_v_shm_tmp = g_p_v_shm;
+//  }
+//#endif
+//
+////   if (g_p_v_shm == (void *)-1)
+////   {
+////     printf("g_p_v_shm is null!\n");
+////     return HI_FAILURE;
+////   }
+//#if 1
+//  struct video_shm_sync_st *g_pshm_tmp = g_p_v_shm;
+// // for(i = 0; i < VIDEO_BUF_NUM; i++)
+// // {
+// //   if(g_pshm_tmp->iFlag == 0xA5A5A5A5)
+// //   {
+// //     break;
+// //   }
+// //   else
+// //   {
+// //     g_pshm_tmp++;
+// //   }
+// // }
+//
+//  if(VIDEO_BUF_NUM == i)
+//  {
+//    //printf("++ no empty audio buffer!\n");
+//    //return HI_FAILURE;
+//    g_pshm_tmp = g_p_v_shm;
+//  }
+//#else
+//    struct video_shm_sync_st *g_pshm_tmp = g_p_v_shm_tmp;
+//    while(g_pshm_tmp->iFlag != 0xA5A5A5A5)
+//    {
+//        //return HI_SUCCESS;
+//        sleep(0);
+//    }
+//    static HI_S32 s32Count = 0;
+//    s32Count++;
+//    if(s32Count == VIDEO_BUF_NUM)
+//    {
+//        g_p_v_shm_tmp = g_p_v_shm;
+//        s32Count = 0;
+//    }
+//    else
+//    {
+//        g_p_v_shm_tmp++;
+//    }
+//#endif
+//  for(i = 0; i < pstStream->u32PackCount; i++)
+//  {
+//    memcpy(g_pshm_tmp->pu8Addr + len, pstStream->pstPack[i].pu8Addr, pstStream->pstPack[i].u32Len);
+//    len += pstStream->pstPack[i].u32Len;
+//  }
+//
+//  g_pshm_tmp->iLen = len;
+//  g_pshm_tmp->iFlag = 0xB4B4B4B4;
+//
+//  //if(shmdt(g_p_a_shm) < 0)
+//  //{
+//  //  perror("shmdt");
+//  //}
+//  //printf("--PutVideoStreamToRingBuffer (%d)!\n", len);
+//
+//  return HI_SUCCESS;
+//}

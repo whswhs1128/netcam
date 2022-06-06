@@ -6,7 +6,7 @@ include $(PORTING_ROOT_DIR)/porting_base.mk
 #SUBDIRS=`ls -d */ | grep -v 'bin' | grep -v 'lib' | grep -v 'include'`
 
 #编译指定子目录
-SUBDIRS=live video_capture audio_capture main
+SUBDIRS=video_capture main
 
 define make_subdir
  @for subdir in $(SUBDIRS) ; do \

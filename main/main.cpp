@@ -24,20 +24,19 @@ extern "C" int rtsp_start();
 int main(int argc, char *argv[])
 {
     HI_S32 s32Ret = HI_SUCCESS;
-    HI_U32 u32Index;
+//    HI_U32 u32Index;
 
-    if (argc < 2)
-    {
-        //SAMPLE_VENC_Usage(argv[0]);
-        return HI_FAILURE;
-    }
-    u32Index = atoi(argv[1]);
+//    if (argc < 2)
+//    {
+//        //SAMPLE_VENC_Usage(argv[0]);
+//        return HI_FAILURE;
+//    }
+//    u32Index = atoi(argv[1]);
 
     //signal(SIGINT, SAMPLE_VENC_HandleSig);
     //signal(SIGTERM, SAMPLE_VENC_HandleSig);
 
     s32Ret = rtsp_start();
-
     if (HI_SUCCESS == s32Ret)
     { printf("program exit normally!\n"); }
     else
