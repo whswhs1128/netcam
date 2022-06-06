@@ -1194,8 +1194,9 @@ void *thVideoCapture(void *arg)
 //   }
 
           SAMPLE_PRT("before vencsteamproc!!\n");
-	//pthread_create(&VencPid, 0, VENC_GetVencStreamProc, NULL);
-	VENC_GetVencStreamProc(NULL);
+	pthread_create(&VencPid, 0, VENC_GetVencStreamProc, NULL);
+	pthread_join(VencPid,0);
+//	VENC_GetVencStreamProc(NULL);
 		//Create osd 
 	//OSD_Handle_Init(1,1);
 
