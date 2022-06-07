@@ -22,6 +22,9 @@
 #include "rtsp_demo.h"
 #include "comm.h"
 #include "mpi_region.h"
+#include "pq_bin.h"
+#include "gk_api_isp.h"
+#include "gk_api_sys.h"
 
 ////int g_vid_shm = -1;
 struct video_shm_sync_st *g_p_v_shm = (video_shm_sync_st*)-1;//
@@ -1028,6 +1031,79 @@ int OSD_Handle_Init( RGN_HANDLE RgnHandle, VENC_CHN RgnVencChn)
 	}
 	return HI_SUCCESS;
 }
+/* 
+    hisi ap:SAMPLE_BIN_IMPORTBINDATA
+    editor:whs
+ */
+static GK_S32 SAMPILE_BIN_ImportBinData(PQ_BIN_MODULE_S *pstBinParam, unsigned char *pBuffer, unsigned int dataLen)
+{
+    unsigned int tempLen;
+    unsigned int size;
+    int ret;
+
+    FILE *pFile = fopen("/ko/pq_bin_gc2053.bin", "r");
+    if (pFile == NULL) {
+        printf("fopen error.\n");
+	return -1;
+    }
+    fseek(pFile, 0, SEEK_END);
+    size = ftell(pFile);
+    fseek(pFile, 0, SEEK_SET);
+
+    unsigned char *pDataBuffer = (unsigned char *)malloc(size);
+    if (pDataBuffer == GK_NULL) {
+        printf("pDataBuffer malloc  fail\n");
+        return GK_FAILURE;
+    }
+    tempLen = fread(pDataBuffer, sizeof(unsigned char), size, pFile);
+    if (tempLen == 0) {
+        printf("read erro\n");
+        ret = -1;
+        goto EXIT;
+    }
+    ret = PQ_BIN_ImportBinData(pstBinParam, pDataBuffer, size);
+    if (ret != 0) {
+        printf("PQ_BIN_ImportBinData error! errno(%#x)\n", ret);
+    } else {
+        printf("PQ_BIN_ParseBinData success!\n");
+    }
+
+EXIT:
+    free(pDataBuffer);
+    pDataBuffer = NULL;
+    if (pFile != NULL) {
+        fclose(pFile);
+    }
+
+    return ret;
+}
+/* 
+    load_pq file function
+    editor:whs
+ */
+int load_pq_bin() {
+    int ret;
+    unsigned int totalLen, ispDataLen, nrxDataLen;
+    PQ_BIN_MODULE_S stBinParam;
+
+    stBinParam.stISP.enable = 1;
+    stBinParam.st3DNR.enable = 0;
+    stBinParam.st3DNR.viPipe = 0;
+    stBinParam.st3DNR.vpssGrp = 0;
+    ispDataLen = PQ_GetISPDataTotalLen();
+    nrxDataLen = PQ_GetStructParamLen(&stBinParam);
+    totalLen = nrxDataLen + ispDataLen;
+    unsigned char *pBuffer = (unsigned char *)malloc(totalLen);
+    if (pBuffer == NULL) {
+        printf("malloc err!\n");
+        return -1;
+    }
+    memset_s(pBuffer, totalLen, 0, totalLen);
+    ret = SAMPILE_BIN_ImportBinData(&stBinParam, pBuffer, totalLen);
+    free(pBuffer);
+    pBuffer = NULL;
+    return ret;
+}
 
 /******************************************************************************
 * function: H.265e + H264e@720P, H.265 Channel resolution adaptable with sensor
@@ -1195,10 +1271,19 @@ void *thVideoCapture(void *arg)
 
           SAMPLE_PRT("before vencsteamproc!!\n");
 	pthread_create(&VencPid, 0, VENC_GetVencStreamProc, NULL);
-	pthread_join(VencPid,0);
 //	VENC_GetVencStreamProc(NULL);
 		//Create osd 
 	//OSD_Handle_Init(1,1);
+#if 0
+	printf("whs:enter pq_import...\n");
+	s32Ret = load_pq_bin();
+    if(HI_SUCCESS != s32Ret) {
+        printf("whs:import pq_bin failed...\n");
+    } else {
+        printf("whs:import pq_bin sucess...\n");
+    }
+#endif
+	pthread_join(VencPid,0);
 
   return NULL;
   printf("please press twice ENTER to exit this sample\n");
