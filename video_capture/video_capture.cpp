@@ -898,7 +898,7 @@ HI_VOID* VENC_GetVencStreamProc(HI_VOID *p)
 	s_maxFd   = s_maxFd > s_LivevencFd ? s_maxFd:s_LivevencFd;	
 	s_maxFd = s_maxFd+1;
 
-	
+	pthread_detach(pthread_self());	
 	//struct sched_param param;
 	struct timeval TimeoutVal;
 	VENC_PACK_S *pstPack = NULL;	
@@ -1284,7 +1284,7 @@ void *thVideoCapture(void *arg)
     }
 #endif
     //	pthread_join(VencPid,0);
-    	pthread_detach(VencPid);
+    	//pthread_detach(VencPid);
 
   printf("whs:test...\n");
        return NULL;
