@@ -156,6 +156,6 @@ extern "C" int rtsp_start() {
 #if 0
   env->taskScheduler().doEventLoop(); // does not return
 #endif
-  // while(1);
+   while(1);
   return 0; // only to prevent compiler warning
 }

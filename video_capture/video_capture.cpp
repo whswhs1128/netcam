@@ -1283,9 +1283,11 @@ void *thVideoCapture(void *arg)
         printf("whs:import pq_bin sucess...\n");
     }
 #endif
-	pthread_join(VencPid,0);
+    //	pthread_join(VencPid,0);
+    	pthread_detach(VencPid);
 
-  return NULL;
+  printf("whs:test...\n");
+       return NULL;
   printf("please press twice ENTER to exit this sample\n");
   getchar();
   getchar();
@@ -1293,7 +1295,7 @@ void *thVideoCapture(void *arg)
   /******************************************
   exit process
   ******************************************/
-  SAMPLE_COMM_VENC_StopGetStream_Ex();
+  //SAMPLE_COMM_VENC_StopGetStream_Ex();
   
 EXIT_VENC_H264_UnBind:
     SAMPLE_COMM_VPSS_UnBind_VENC(VpssGrp,VpssChn[1],VencChn[1]);
