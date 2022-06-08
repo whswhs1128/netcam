@@ -44,9 +44,10 @@
 //      << inputFileName << "\"\n";
 //  announceURL(rtspServer, sms);
 //}
-
-int g_avid_shm = -1;
-void *g_p_av_shm = (void *)-1;//
+typedef struct {
+  rtsp_demo_handle g_rtsplive = NULL;
+  rtsp_session_handle session= NULL;
+}rtsp_handle_struct;
 ////struct video_shm_sync_st *g_p_v_shm_tmp = (video_shm_sync_st*)-1;//
 
 
@@ -144,15 +145,19 @@ extern "C" int rtsp_start() {
 
   pthread_t thAudioID = 0;
   pthread_t thVideoID = 0;
-  struct video_shm_sync_st *g_pvshm = (struct video_shm_sync_st *)g_p_av_shm;
+  rtsp_handle_struct rtsp_handle;
+//  struct video_shm_sync_st *g_pvshm = (struct video_shm_sync_st *)g_p_av_shm;
+  rtsp_handle.g_rtsplive = create_rtsp_demo(554);
+  rtsp_handle.session= create_rtsp_session(rtsp_handle.g_rtsplive,"/live.sdp");
   /**/
-  // pthread_create(&thAudioID, NULL, thAudioCapture, g_pashm);
+  //pthread_create(&thAudioID, NULL, thAudioCapture, (void*)&rtsp_handle);
   //thAudioCapture(NULL);
   //sleep(1);
 
 
- //pthread_create(&thVideoID, NULL, thVideoCapture, g_pvshm);
-  thVideoCapture(g_pvshm);
+  pthread_create(&thVideoID, NULL, thVideoCapture, (void*)&rtsp_handle);
+//  pthread_create(&thAudioID, NULL, thAudioCapture, (void*)&rtsp_handle);
+  //thVideoCapture(g_pvshm);
 #if 0
   env->taskScheduler().doEventLoop(); // does not return
 #endif
