@@ -22,12 +22,22 @@
 
 #include "hi_resampler_api.h"
 #include "hi_vqe_register_api.h"
+#include "rtsp_demo.h"
+#include "comm.h"
 
-
-#include "liveMedia.hh"
+//#include "liveMedia.hh"
 #include "audio_capture.h"
 ////int g_aid_shm = -1;
-struct audio_shm_sync_st *g_p_a_shm = (audio_shm_sync_st*)-1;//指向shm
+//struct audio_shm_sync_st *g_p_a_shm = (audio_shm_sync_st*)-1;//指向shm
+
+typedef struct {
+  rtsp_demo_handle g_rtsplive = NULL;
+  rtsp_session_handle session= NULL;
+}rtsp_handle_struct;
+
+rtsp_demo_handle q_g_rtsplive = NULL;
+rtsp_session_handle q_session= NULL;
+
 
 typedef struct tagSAMPLE_AENC_S
 {
@@ -531,7 +541,7 @@ void SAMPLE_AUDIO_HandleSig(HI_S32 signo)
 
     exit(0);
 }
-
+#if 0
 HI_S32 PutAudioStreamToRingBuffer(AUDIO_STREAM_S *pstStream)
 {
   HI_S32 i;
@@ -618,7 +628,7 @@ HI_S32 PutAudioStreamToRingBuffer(AUDIO_STREAM_S *pstStream)
 
   return HI_SUCCESS;
 }
-
+#endif
 /******************************************************************************
 * function : get stream from Aenc, send it  to rtsp
 ******************************************************************************/
@@ -634,6 +644,10 @@ void* AencProc(void* parg)
     FD_ZERO(&read_fds);
     AencFd = HI_MPI_AENC_GetFd(pstAencCtl->AeChn);
     FD_SET(AencFd, &read_fds);
+
+    unsigned char* pStremData = NULL;
+    int nSize = 0;
+    int i;
 
     while (pstAencCtl->bStart)
     {
@@ -666,7 +680,13 @@ void* AencProc(void* parg)
                 return NULL;
             }
 
-            PutAudioStreamToRingBuffer(&stStream);
+            //PutAudioStreamToRingBuffer(&stStream);
+	   // for (i = 0; i < stStream.u32PackCount; i++)
+	   // {
+		pStremData = (unsigned char*)stStream.pStream;
+		nSize = stStream.u32Len;
+		rtsp_tx_audio(q_session,pStremData,nSize,stStream.u64TimeStamp);
+	   // }	
 #if 0
             /* send stream to decoder and play for testing */
             if (HI_TRUE == pstAencCtl->bSendAdChn)
@@ -753,7 +773,11 @@ void *thAudioCapture(void* parg)
   AIO_ATTR_S stAioAttr;
 
   HI_BOOL     bSendAdec = HI_TRUE;
-  g_p_a_shm = (audio_shm_sync_st*)parg;
+  //g_p_a_shm = (audio_shm_sync_st*)parg;
+  pthread_detach(pthread_self());
+	rtsp_handle_struct* rtsp_handle = (rtsp_handle_struct*)parg;
+        q_g_rtsplive = rtsp_handle->g_rtsplive;
+        q_session= rtsp_handle->session;
 
   signal(SIGINT, SAMPLE_AUDIO_HandleSig);
   signal(SIGTERM, SAMPLE_AUDIO_HandleSig);

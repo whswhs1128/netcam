@@ -27,8 +27,12 @@
 #include "gk_api_sys.h"
 
 ////int g_vid_shm = -1;
-struct video_shm_sync_st *g_p_v_shm = (video_shm_sync_st*)-1;//
+//struct video_shm_sync_st *g_p_v_shm = (video_shm_sync_st*)-1;//
 ////struct video_shm_sync_st *g_p_v_shm_tmp = (video_shm_sync_st*)-1;//
+typedef struct {
+  rtsp_demo_handle g_rtsplive = NULL;
+  rtsp_session_handle session= NULL;
+}rtsp_handle_struct;
 
 #define BIG_STREAM_SIZE     PIC_2688x1944
 #define SMALL_STREAM_SIZE   PIC_VGA
@@ -40,8 +44,8 @@ static pthread_t VencPid;
 #define ONLINE_LIMIT_WIDTH    2304
 
 #define WRAP_BUF_LINE_EXT     416
-rtsp_demo_handle g_rtsplive = NULL;
-rtsp_session_handle session= NULL;
+rtsp_demo_handle p_g_rtsplive = NULL;
+rtsp_session_handle p_session= NULL;
 
 typedef struct hiSAMPLE_VPSS_ATTR_S
 {
@@ -959,9 +963,9 @@ HI_VOID* VENC_GetVencStreamProc(HI_VOID *p)
 				pStremData = (unsigned char*)stVStream.pstPack[i].pu8Addr+stVStream.pstPack[i].u32Offset;
 				nSize = stVStream.pstPack[i].u32Len-stVStream.pstPack[i].u32Offset;
 
-				if(g_rtsplive)
+				if(p_g_rtsplive)
 				{
-					rtsp_sever_tx_video(g_rtsplive,session,pStremData,nSize,stVStream.pstPack[i].u64PTS);
+					rtsp_sever_tx_video(p_g_rtsplive,p_session,pStremData,nSize,stVStream.pstPack[i].u64PTS);
 				}
 			}	
 	
@@ -1135,8 +1139,10 @@ void *thVideoCapture(void *arg)
       SAMPLE_VPSS_CHN_ATTR_S stParam;
       SAMPLE_VB_ATTR_S commVbAttr;
   //g_p_v_shm = (video_shm_sync_st*)arg;
-  	g_rtsplive = create_rtsp_demo(554);
-	session= create_rtsp_session(g_rtsplive,"/live.sdp");
+
+      rtsp_handle_struct* rtsp_handle = (rtsp_handle_struct*)arg;
+  	p_g_rtsplive = rtsp_handle->g_rtsplive;
+	p_session= rtsp_handle->session;
     
       for(i=0; i<s32ChnNum; i++)
       {

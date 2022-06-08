@@ -22,7 +22,7 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 #define _ANNOUNCE_URL_HH
 
 #ifndef _LIVEMEDIA_HH
-#include "liveMedia.hh"
+//#include "liveMedia.hh"
 #endif
 
 void announceURL(RTSPServer* rtspServer, ServerMediaSession* sms);
