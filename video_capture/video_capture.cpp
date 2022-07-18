@@ -907,8 +907,6 @@ HI_VOID* VENC_GetVencStreamProc(HI_VOID *p)
 	struct timeval TimeoutVal;
 	VENC_PACK_S *pstPack = NULL;	
 	pstPack = (VENC_PACK_S *)malloc(sizeof(VENC_PACK_S) * 128);
-	printf("enter streamproc function...\n");
-          SAMPLE_PRT("before  steamproc function...!!\n");
 	if (NULL == pstPack)
 	{
 		pstPack = NULL;
@@ -918,7 +916,6 @@ HI_VOID* VENC_GetVencStreamProc(HI_VOID *p)
 
 	unsigned char* pStremData = NULL;
 	int nSize = 0;
-	printf("enter streamproc function2...\n");
 
 	while(1)	
 	{
@@ -1275,7 +1272,6 @@ void *thVideoCapture(void *arg)
 //     goto EXIT_VENC_H264_UnBind;
 //   }
 
-          SAMPLE_PRT("before vencsteamproc!!\n");
 	pthread_create(&VencPid, 0, VENC_GetVencStreamProc, NULL);
 //	VENC_GetVencStreamProc(NULL);
 		//Create osd 
@@ -1292,7 +1288,6 @@ void *thVideoCapture(void *arg)
     //	pthread_join(VencPid,0);
     	//pthread_detach(VencPid);
 
-  printf("whs:test...\n");
        return NULL;
   printf("please press twice ENTER to exit this sample\n");
   getchar();
