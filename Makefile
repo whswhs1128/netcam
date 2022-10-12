@@ -15,7 +15,7 @@ define make_subdir
 endef
 
 all:
-	$(call make_subdir , all)
+	$(call make_subdir , install)
 
 install:
 	$(call make_subdir , install)
